@@ -1,0 +1,120 @@
+#!/usr/bin/env python
+import argparse
+import getpass
+import sys
+import os
+from aws_ip import *
+from aws_access import access
+from aws_availabiltyzone import availability_zones
+from aws_image import images
+from aws_instance import instances
+from aws_keypair import key_pairs
+from aws_networkacl import network_acls
+from aws_reservedinstance import reserved_instances
+from aws_securitygroups import security_groups
+from aws_spotrequest import spot_requests
+from aws_subnet import subnets
+from aws_volume import volumes
+
+
+def get_envs():
+
+  envs = []
+  user=getpass.getuser()
+  with open(os.path.expanduser('~/.aws/credentials'),'r') as aws_file:
+    for line in aws_file:
+      if line.startswith('[{}'.format(user)) and line.endswith(']\n'):
+        envs.append(line[(len(user)+1):-2])
+  return envs
+
+
+def ip_report(environment,report_type):
+
+  ip_dictionary = define_ip_addresses(environment)
+  if report_type=="name": pprint.pprint(name_ips(ip_dictionary))
+  elif report_type=="inconsistent-tags": find_inconsistently_named_ips(environment,ip_dictionary)
+  elif report_type=="no-tags": find_no_name_ips(environment,ip_dictionary)
+  else: sys.stderr.write("ip reports available: name, inconsistent-tags, no-tags\n"); exit(1)
+
+
+def access_report(environment,search_host,table_flag,long_flag):
+
+  try:
+    QUERY=search_host[0]
+  except IndexError:
+    QUERY='all'
+  access(environment,QUERY,table_flag,long_flag)
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+  'environment',
+)
+parser.add_argument(
+  'program',
+  choices=[
+    'access',
+    'availabilityzones',
+    'images',
+    'instances',
+    'ips',
+    'keypairs',
+    'networkacls',
+    'reservedinstances',
+    'securitygroups',
+    'spotrequests',
+    'subnets',
+    'volumes'
+  ]
+)
+parser.add_argument(
+  'other',
+  nargs='*'
+)
+parser.add_argument(
+  '-l','--long',
+  action='store_true',
+  help='display extra columns (if report supports it)'
+)
+parser.add_argument(
+  '-t','--table',
+  action='store_true',
+  help='display output in table form (if report supports it)'
+)
+args = parser.parse_args()
+
+ENVIRONMENTS=args.environment.split()
+if ENVIRONMENTS[0]=='all':
+  ENVIRONMENTS=get_envs()
+LONG=args.long
+TABLE=args.table
+temp_tags=[]
+for ENVIRONMENT in ENVIRONMENTS:
+  #if args.program=="ips": ip_report(ENVIRONMENT,args.other[0])
+  if args.program=="ips" and len(args.other)==0: sys.stderr.write("USAGE: awsreport 'envs' ip 'ip report'\nip reports available: name, inconsistent-tags, no-tags\n"); exit(1)
+  if args.program=="ips" and args.other[0]=="name": pprint.pprint(name_ips(define_ip_addresses(ENVIRONMENT)))
+  elif args.program=="ips" and args.other[0]=="inconsistent-tags": find_inconsistently_named_ips(ENVIRONMENT,define_ip_addresses(ENVIRONMENT))
+  elif args.program=="ips" and args.other[0]=="no-tags": find_no_name_ips(ENVIRONMENT,define_ip_addresses(ENVIRONMENT))
+  elif args.program=="ips" and args.other[0]=="temp-tags": temp_tags.append(find_temp_ips(ENVIRONMENT,define_ip_addresses(ENVIRONMENT)))
+  elif args.program=="ip": sys.stderr.write("USAGE: awsreport 'envs' ip 'ip report'\nip reports available: name, inconsistent-tags, no-tags\n"); exit(1)
+  elif args.program=="access": access_report(ENVIRONMENT,args.other,TABLE,LONG)
+  elif args.program=="availabilityzones": availability_zones(ENVIRONMENT,TABLE)
+  elif args.program=="images": images(ENVIRONMENT,TABLE)
+  elif args.program=="instances": instances(ENVIRONMENT,LONG,TABLE)
+  elif args.program=="keypairs": key_pairs(ENVIRONMENT,TABLE)
+  elif args.program=="networkacls": network_acls(ENVIRONMENT,TABLE)
+  elif args.program=="reservedinstances": reserved_instances(ENVIRONMENT,TABLE)
+  elif args.program=="securitygroups": security_groups(ENVIRONMENT,TABLE)
+  elif args.program=="spotrequests": spot_requests(ENVIRONMENT,TABLE)
+  elif args.program=="subnets": subnets(ENVIRONMENT,TABLE)
+  elif args.program=="volumes": volumes(ENVIRONMENT,TABLE)
+  else: print 'You may ask yourself: "how did I get here?"'
+
+if args.program=="ips" and args.other[0]=="temp-tags":
+  temp_addresses = list(set([ip["address"] for env in temp_tags for ip in env]))
+  for address in temp_addresses:
+    for ENVIRONMENT in ENVIRONMENTS:
+      try: entries = define_ip_addresses(ENVIRONMENT)[address]
+      except KeyError: pass
+      for entry in entries: print ','.join(map(str,[address,entry.tag,ENVIRONMENT,entry.security_group_id]))
+
